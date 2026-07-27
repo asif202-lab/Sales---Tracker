@@ -42,7 +42,7 @@
   <a id="bst-contact-banner" href="#" target="_blank" style="display:block;background:#1F4E78;color:#fff;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer">
     Managed by Asif — click here to reach out for access requests or before changing any settings.
   </a>
-  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: detailed-result-v25)</span></h2>
+  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: legacy-month-migration-v26)</span></h2>
 
   <div class="bst-card" id="bst-landing-gate">
     <div class="bst-title">Enter your password</div>
@@ -157,7 +157,7 @@
 
   // CONFIG: set this to your deployed Apps Script Web App URL (the same one your registration
   // page uses, ending in /exec)
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwjuWBIJqe0biJLEQlZ0Mqv5nsodW_hAzAomtHNJ9ZC-DleryiqDlCcjsUd8LcZ-C3c/exec;
+  const APPS_SCRIPT_URL = 'const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwjuWBIJqe0biJLEQlZ0Mqv5nsodW_hAzAomtHNJ9ZC-DleryiqDlCcjsUd8LcZ-C3c/exec';';
 
   // Talks to the Apps Script backend via plain fetch (not google.script.run), so this page
   // can be hosted anywhere as a static file instead of inside Apps Script's own page-serving.
@@ -422,14 +422,31 @@
   }
   // Fixes any month keys saved without zero-padding (e.g. "2026-5" instead of "2026-05")
   // so sorting and comparisons work correctly regardless of how a key was originally saved.
+  const CAL_MONTH_NAMES_LOWER = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
   function normalizeMonthlyHistoryKeys(mh){
-    const fixed = {};
+    // Pass 1: migrate old bare month-name keys ("Jan", "Feb", no year) to "2026-MM" format.
+    // These predate the calendar-based month system and were always meant as 2026, the only
+    // year that's existed in this tracker so far.
+    const migrated = {};
     for (const key of Object.keys(mh)){
+      const bareIdx = CAL_MONTH_NAMES_LOWER.indexOf(String(key).toLowerCase().slice(0,3));
+      if (bareIdx !== -1 && !/\d/.test(key)){
+        const properKey = '2026-'+String(bareIdx+1).padStart(2,'0');
+        // If a properly-formatted key for the same month already exists, prefer its value
+        // (it's the more deliberately-entered one) rather than overwriting it.
+        if (!(properKey in mh) && !(properKey in migrated)) migrated[properKey] = mh[key];
+      } else {
+        migrated[key] = mh[key];
+      }
+    }
+    // Pass 2: fix any remaining unpadded "YYYY-M" keys.
+    const fixed = {};
+    for (const key of Object.keys(migrated)){
       const parts = key.split('-');
-      if (parts.length !== 2) { fixed[key] = mh[key]; continue; }
+      if (parts.length !== 2) { fixed[key] = migrated[key]; continue; }
       const [y,m] = parts;
       const properKey = y+'-'+String(parseInt(m,10)).padStart(2,'0');
-      fixed[properKey] = mh[key]; // if a duplicate exists under both forms, the later one wins
+      fixed[properKey] = migrated[key];
     }
     return fixed;
   }
@@ -493,7 +510,17 @@
     }catch(e){}
     try{
       const mh = await storageGet('monthlyhistory_'+def.storageKey);
-      if (mh) state[def.id].monthlyHistory = normalizeMonthlyHistoryKeys({...defaultMonthlyHistory(), ...JSON.parse(mh)});
+      if (mh){
+        const rawParsed = {...defaultMonthlyHistory(), ...JSON.parse(mh)};
+        const normalized = normalizeMonthlyHistoryKeys(rawParsed);
+        state[def.id].monthlyHistory = normalized;
+        // If migration actually changed anything (old bare-month keys, unpadded keys), save
+        // the cleaned-up version back so this only ever needs to happen once.
+        if (JSON.stringify(Object.keys(rawParsed).sort()) !== JSON.stringify(Object.keys(normalized).sort())
+            || JSON.stringify(rawParsed) !== JSON.stringify(normalized)){
+          storageSet('monthlyhistory_'+def.storageKey, JSON.stringify(normalized)).catch(()=>{});
+        }
+      }
     }catch(e){}
     try{
       const cmk = await storageGet('currentmonthkey_'+def.storageKey);
