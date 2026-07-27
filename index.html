@@ -42,7 +42,7 @@
   <a id="bst-contact-banner" href="#" target="_blank" style="display:block;background:#1F4E78;color:#fff;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer">
     Managed by Asif — click here to reach out for access requests or before changing any settings.
   </a>
-  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: daily-import-v24)</span></h2>
+  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: detailed-result-v25)</span></h2>
 
   <div class="bst-card" id="bst-landing-gate">
     <div class="bst-title">Enter your password</div>
@@ -157,7 +157,7 @@
 
   // CONFIG: set this to your deployed Apps Script Web App URL (the same one your registration
   // page uses, ending in /exec)
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwjuWBIJqe0biJLEQlZ0Mqv5nsodW_hAzAomtHNJ9ZC-DleryiqDlCcjsUd8LcZ-C3c/exec';
+  const APPS_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 
   // Talks to the Apps Script backend via plain fetch (not google.script.run), so this page
   // can be hosted anywhere as a static file instead of inside Apps Script's own page-serving.
@@ -688,8 +688,9 @@
   function paceResult(cumAchieved, pool, daysElapsed, totalDays){
     if (daysElapsed === 0) return {status:'not-started'};
     const projected = (cumAchieved/daysElapsed) * totalDays;
-    if (projected >= pool) return {status:'good'};
-    return {status:'bad', pct: projected ? (pool-projected)/projected : 1};
+    const remainingDays = Math.max(totalDays - daysElapsed, 0);
+    const gapAmount = pool - projected; // AED - positive means behind pace, negative/zero means ahead or on pace
+    return {status: gapAmount <= 0 ? 'good' : 'bad', gapAmount, remainingDays};
   }
 
   function cumCategoryAchievedSimple(s, rows, kind){
@@ -1399,6 +1400,22 @@
     }
   }
 
+  function formatResultDetail(res, price){
+    if (res.status==='not-started') return {html:'Not started', cls:''};
+    const isPcs = price != null;
+    const rawAmount = Math.abs(res.gapAmount);
+    const amount = isPcs ? Math.round(rawAmount/price) : rawAmount;
+    const perDayRaw = res.remainingDays > 0 ? amount/res.remainingDays : null;
+    const perDay = isPcs ? Math.round(perDayRaw) : perDayRaw;
+    const amountText = isPcs ? amount+' pcs' : fmtAED(amount);
+    const perDayText = perDayRaw==null ? '' : ` (${isPcs?perDay+' pcs':fmtAED(perDay)}/day)`;
+    if (res.status==='good'){
+      if (amount===0) return {html:'<span class="bst-pill bst-pill-good">On pace</span>', cls:'bst-good'};
+      return {html:`<span class="bst-pill bst-pill-good">+${amountText} ahead${perDayText}</span>`, cls:'bst-good'};
+    }
+    return {html:`<span class="bst-pill bst-pill-bad">-${amountText} total${perDayText}</span>`, cls:'bst-bad'};
+  }
+
   function renderOutletCategories(def){
     const st = state[def.id];
     const s = st.settings, rows = st.rows;
@@ -1411,30 +1428,27 @@
     if (def.kind === 'simple'){
       const totalElapsed = daysElapsedOfType(rows, ()=>true);
       cats = [
-        ['Regular promo', s.regularPromoPct, 'regular', s.monthlyTarget*s.regularPromoPct, totalElapsed, totalDays],
-        ['Add On promo', s.addOnPromoPct, 'addOn', s.monthlyTarget*s.addOnPromoPct, totalElapsed, totalDays],
-        ['A la carte (remainder)', alacartePctSimple(s), 'ala', s.monthlyTarget*alacartePctSimple(s), totalElapsed, totalDays],
+        ['Regular promo', s.regularPromoPct, 'regular', s.monthlyTarget*s.regularPromoPct, totalElapsed, totalDays, s.regularPrice],
+        ['Add On promo', s.addOnPromoPct, 'addOn', s.monthlyTarget*s.addOnPromoPct, totalElapsed, totalDays, s.addOnPrice],
+        ['A la carte (remainder)', alacartePctSimple(s), 'ala', s.monthlyTarget*alacartePctSimple(s), totalElapsed, totalDays, null],
       ];
     } else {
       const wdElapsed = daysElapsedOfType(rows, r=>!r.weekend);
       const weElapsed = daysElapsedOfType(rows, r=>r.weekend);
       const totalElapsed = daysElapsedOfType(rows, ()=>true);
       cats = [
-        ['Weekday promo', s.wdPromoPct, 'wdPromo', s.monthlyTarget*s.wdPromoPct, wdElapsed, wdTotal],
-        ['Weekend regular', s.weRegPct, 'weReg', s.monthlyTarget*s.weRegPct, weElapsed, weTotal],
-        ['Weekend premium', s.wePremPct, 'wePrem', s.monthlyTarget*s.wePremPct, weElapsed, weTotal],
-        ['A la carte (remainder)', alacartePct(s), 'ala', s.monthlyTarget*alacartePct(s), totalElapsed, totalDays],
+        ['Weekday promo', s.wdPromoPct, 'wdPromo', s.monthlyTarget*s.wdPromoPct, wdElapsed, wdTotal, s.wdPrice],
+        ['Weekend regular', s.weRegPct, 'weReg', s.monthlyTarget*s.weRegPct, weElapsed, weTotal, s.regPrice],
+        ['Weekend premium', s.wePremPct, 'wePrem', s.monthlyTarget*s.wePremPct, weElapsed, weTotal, s.premPrice],
+        ['A la carte (remainder)', alacartePct(s), 'ala', s.monthlyTarget*alacartePct(s), totalElapsed, totalDays, null],
       ];
     }
     const body = document.getElementById('bst-cat-body-'+def.id);
-    body.innerHTML = cats.map(([label,pct,kind,pool,elapsed,total])=>{
+    body.innerHTML = cats.map(([label,pct,kind,pool,elapsed,total,price])=>{
       const cumAchieved = cumFn(s, rows, kind);
       const ach = totalAchievedSoFar ? cumAchieved/totalAchievedSoFar : null;
       const res = paceResult(cumAchieved, pool, elapsed, total);
-      let resHtml, cls='';
-      if (res.status==='not-started'){ resHtml='Not started'; }
-      else if (res.status==='good'){ resHtml='<span class="bst-pill bst-pill-good">Achieving</span>'; cls='bst-good'; }
-      else { resHtml=`<span class="bst-pill bst-pill-bad">Upsell +${Math.round(res.pct*100)}%</span>`; cls='bst-bad'; }
+      const {html:resHtml, cls} = formatResultDetail(res, price);
       return `<tr><td style="text-align:left">${label}</td><td>${fmtPct(pct)}</td><td>${ach==null?'Not started':fmtPct(ach)}</td><td class="${cls}">${resHtml}</td></tr>`;
     }).join('');
 
@@ -1449,10 +1463,7 @@
       const cumAchieved = cumFn(s, rows, kind);
       const ach = totalAchievedSoFar ? cumAchieved/totalAchievedSoFar : null;
       const res = paceResult(cumAchieved, pool, elapsed, total);
-      let resHtml, cls='';
-      if (res.status==='not-started'){ resHtml='Not started'; }
-      else if (res.status==='good'){ resHtml='<span class="bst-pill bst-pill-good">Achieving</span>'; cls='bst-good'; }
-      else { resHtml=`<span class="bst-pill bst-pill-bad">Upsell +${Math.round(res.pct*100)}%</span>`; cls='bst-bad'; }
+      const {html:resHtml, cls} = formatResultDetail(res, null);
       return `<tr><td style="text-align:left">${label}</td><td>${fmtPct(pct)}</td><td>${ach==null?'Not started':fmtPct(ach)}</td><td class="${cls}">${resHtml}</td></tr>`;
     }).join('');
   }
