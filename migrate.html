@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Sales Tracker - One-time Firebase Migration</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #2a2a28; }
+  h2 { margin-bottom: 4px; }
+  #log { background: #f7f6f2; border: 1px solid #ddd; border-radius: 8px; padding: 16px; height: 420px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 13px; line-height: 1.5; }
+  button { padding: 10px 20px; border-radius: 8px; border: none; background: #1F4E78; color: #fff; font-size: 15px; cursor: pointer; margin: 12px 0; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  .ok { color: #1a7d3a; }
+  .err { color: #a32d2d; }
+</style>
+</head>
+<body>
+<h2>Sales Tracker - One-time Firebase Migration</h2>
+<p>This copies every piece of your existing data (unchanged) from the old Google Sheets backend into your new Firestore database. Nothing on the old side is touched or deleted - this is a pure copy. Safe to run more than once if needed.</p>
+<button id="startBtn" onclick="runMigration()">Start Migration</button>
+<div id="log"></div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+  import { getFirestore, doc, setDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDw8epwE5qNRtw7y8qr_sZuAObT0S7v-2o",
+    authDomain: "sales-tracker-asif.firebaseapp.com",
+    projectId: "sales-tracker-asif",
+    storageBucket: "sales-tracker-asif.firebasestorage.app",
+    messagingSenderId: "855394238838",
+    appId: "1:855394238838:web:deb4d85bbf81b8a96e3a57"
+  };
+  const fbApp = initializeApp(firebaseConfig);
+  const db = getFirestore(fbApp);
+
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwjuWBIJqe0biJLEQlZ0Mqv5nsodW_hAzAomtHNJ9ZC-DleryiqDlCcjsUd8LcZ-C3c/exec';
+
+  const logEl = document.getElementById('log');
+  function log(msg, cls){
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function callBackend(action, params){
+    return fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({action, ...(params||{})})
+    }).then(r => r.json());
+  }
+
+  window.runMigration = async function(){
+    document.getElementById('startBtn').disabled = true;
+    try{
+      log('Step 1: Fetching all main data (settings, access, current rows, monthly totals)...');
+      const allDataResult = await callBackend('getAllData');
+      if (allDataResult.status !== 'ok') throw new Error('getAllData failed: ' + JSON.stringify(allDataResult));
+      const allData = JSON.parse(allDataResult.result);
+      const mainKeys = Object.keys(allData);
+      log('Found ' + mainKeys.length + ' main keys.', 'ok');
+
+      log('');
+      log('Step 2: Fetching the list of every archived month (daily detail)...');
+      const archiveListResult = await callBackend('listArchiveKeysWithPrefix', {prefix: 'archivedrows_'});
+      if (archiveListResult.status !== 'ok') throw new Error('listArchiveKeysWithPrefix failed: ' + JSON.stringify(archiveListResult));
+      const archiveKeys = JSON.parse(archiveListResult.result);
+      log('Found ' + archiveKeys.length + ' archived months across all outlets.', 'ok');
+
+      log('');
+      log('Step 3: Fetching each archived month\'s data (this may take a little while)...');
+      const archiveData = {};
+      for (let i = 0; i < archiveKeys.length; i++){
+        const key = archiveKeys[i];
+        const result = await callBackend('getData', {key});
+        if (result.status === 'ok' && result.result != null) archiveData[key] = result.result;
+        log('  (' + (i+1) + '/' + archiveKeys.length + ') ' + key);
+      }
+
+      log('');
+      log('Step 4: Writing everything to Firestore...');
+      const allEntries = { ...allData, ...archiveData };
+      const entryList = Object.entries(allEntries);
+      let written = 0;
+      // Firestore batches are capped at 500 writes - chunk accordingly.
+      for (let i = 0; i < entryList.length; i += 400){
+        const chunk = entryList.slice(i, i+400);
+        const batch = writeBatch(db);
+        chunk.forEach(([key, value]) => {
+          batch.set(doc(db, 'kv', key), { value });
+        });
+        await batch.commit();
+        written += chunk.length;
+        log('  Written ' + written + ' / ' + entryList.length + ' documents...');
+      }
+
+      log('');
+      log('=== MIGRATION COMPLETE ===', 'ok');
+      log('Total documents copied to Firestore: ' + entryList.length, 'ok');
+      log('Your old Google Sheet is untouched - this was a pure copy.', 'ok');
+    }catch(err){
+      log('');
+      log('ERROR: ' + err.message, 'err');
+      log('Please copy this entire log and send it back.', 'err');
+    }
+    document.getElementById('startBtn').disabled = false;
+  };
+</script>
+</body>
+</html>
