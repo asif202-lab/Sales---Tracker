@@ -71,6 +71,7 @@
         <button class="bst-btn" id="bst-dash-toggle-sales" type="button">Sales</button>
         <button class="bst-btn" id="bst-dash-toggle-promo" type="button">Promo Stats</button>
       </div>
+      <div style="background:#FFF7E6;border:1px solid #F0C36D;border-radius:8px;padding:8px 14px;margin-bottom:.75rem;font-size:13px;font-weight:600;color:#8A5A00">&#128065; View only - nothing on this page can be changed or saved</div>
       <div class="bst-title" style="margin:0" id="bst-dashboard-title"><span id="bst-dashboard-label-text">Asif's dashboard</span> <span id="bst-current-month-label" style="font-weight:400;font-size:13px;color:var(--text-muted,#898781)"></span></div>
       <select id="bst-dash-mode" style="margin-top:.5rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border-strong,#c3c2b7);font-size:13px">
         <option value="trend">Live Report</option>
@@ -2382,17 +2383,8 @@
     body.querySelectorAll('.bst-plan-promo-target').forEach(input=>input.addEventListener('input', recalcLiveTargets));
     recalcLiveTargets();
 
-    document.getElementById('bst-plan-save-btn').onclick = async () => {
-      body.querySelectorAll('[data-action="plan-row-target"]').forEach(input=>{
-        const val = parseFloat(input.value);
-        if (!isNaN(val) && val>=0) state[def.id].settings[input.dataset.key] = val;
-      });
-      const wdPoolInput = document.getElementById('bst-plan-wdpool-pct');
-      const wdPoolVal = parseFloat(wdPoolInput.value);
-      if (!isNaN(wdPoolVal) && wdPoolVal>=0 && wdPoolVal<=100) state[def.id].settings.wdPoolPct = wdPoolVal/100;
-      await saveSettings(def);
-      renderAll();
-      alert('Saved - '+(s.outletName||def.defaultSettings.outletName)+"'s targets for "+monthLabel(targetKey)+' are updated.');
+    document.getElementById('bst-plan-save-btn').onclick = () => {
+      alert('This is a view-only copy of the dashboard - changes here are not saved. You can still explore the numbers, they just won\'t be written back.');
     };
 
     outletSel.onchange = renderDashboardPlan;
@@ -2433,15 +2425,12 @@
       const person = inchargesCache.find(p=>p.oneSignalId===osid);
       const select = tr.querySelector('[data-action="assign"]');
       select.value = person.outletId || '';
-      select.addEventListener('change', async e=>{
-        await assignInchargeRemote(osid, e.target.value);
-        person.outletId = e.target.value || null;
+      select.addEventListener('change', e=>{
+        alert('This is a view-only copy - incharge assignments can\'t be changed here.');
+        select.value = person.outletId || '';
       });
-      tr.querySelector('[data-action="remove"]').addEventListener('click', async ()=>{
-        if (!confirm('Remove '+person.name+' from the reminder list?')) return;
-        await removeInchargeRemote(osid);
-        inchargesCache = inchargesCache.filter(p=>p.oneSignalId!==osid);
-        renderDashboardIncharges();
+      tr.querySelector('[data-action="remove"]').addEventListener('click', ()=>{
+        alert('This is a view-only copy - incharges can\'t be removed here.');
       });
     });
   }
