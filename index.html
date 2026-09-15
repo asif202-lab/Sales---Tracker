@@ -48,7 +48,7 @@
   <a id="bst-contact-banner" href="#" target="_blank" style="display:block;background:#1F4E78;color:#fff;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer">
     Managed by Asif — click here to reach out for access or any queries.
   </a>
-  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: fresh-reads-v90)</span></h2>
+  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: safe-field-save-v91)</span></h2>
 
   <div class="bst-card" id="bst-landing-gate">
     <div class="bst-title">Enter your password</div>
@@ -849,6 +849,20 @@
   }
   async function saveSettings(def){ try{ await storageSet('settings_'+def.storageKey, JSON.stringify(state[def.id].settings)); }catch(e){} }
   async function saveRows(def){ try{ await storageSet('rows_'+def.storageKey, JSON.stringify(state[def.id].rows)); }catch(e){} }
+  // Safe single-field save: always re-fetches the true latest state from the server first,
+  // applies only this one changed field on top of it, then saves - this way a browser tab left
+  // open for days (with its own outdated copy of the whole month) can never wipe out a
+  // correction made elsewhere just by editing one cell.
+  async function saveRowField(def, dayIndex, field, value){
+    try{
+      const freshRaw = await storageGetFresh('rows_'+def.storageKey);
+      const freshRows = freshRaw ? JSON.parse(freshRaw) : state[def.id].rows;
+      if (!freshRows[dayIndex]) return;
+      freshRows[dayIndex][field] = value;
+      await storageSet('rows_'+def.storageKey, JSON.stringify(freshRows));
+      state[def.id].rows = freshRows; // bring this tab's own view back in sync with the merged result
+    }catch(e){}
+  }
   async function saveLastMonth(def){ try{ await storageSet('lastmonth_'+def.storageKey, JSON.stringify(state[def.id].lastMonth)); }catch(e){} }
   async function saveMonthlyHistory(def){ try{ await storageSet('monthlyhistory_'+def.storageKey, JSON.stringify(state[def.id].monthlyHistory)); }catch(e){} }
   // Saves a key and then genuinely re-reads it back from the server (not the local cache) to
@@ -3620,8 +3634,9 @@
       tr.querySelectorAll('input').forEach(inp=>{
         const field = inp.dataset.field;
         inp.addEventListener('change', e=>{
-          rows[i][field] = num(e.target.value);
-          saveRows(def); renderAll();
+          const value = num(e.target.value);
+          rows[i][field] = value; // update this tab's own view immediately for responsiveness
+          saveRowField(def, i, field, value); renderAll();
         });
       });
     });
