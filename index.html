@@ -48,7 +48,7 @@
   <a id="bst-contact-banner" href="#" target="_blank" style="display:block;background:#1F4E78;color:#fff;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer">
     Managed by Asif — click here to reach out for access or any queries.
   </a>
-  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: safe-field-save-v91)</span></h2>
+  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: rollover-grace-period-v92)</span></h2>
 
   <div class="bst-card" id="bst-landing-gate">
     <div class="bst-title">Enter your password</div>
@@ -897,6 +897,15 @@
 
     const endingKey = st.currentMonthKey;
     const rows = st.rows;
+
+    // If the ending month's last real day hasn't had its sales entered yet, hold off on
+    // rolling over - the outlet stays on their current month so they can still fill that day
+    // in, rather than it silently becoming inaccessible. This only holds for up to 2 days
+    // into the new month, so a genuinely missing day never blocks the calendar forever.
+    const lastRealDayIdx = daysInMonth(endingKey) - 1;
+    const lastDayMissing = !rows[lastRealDayIdx] || rows[lastRealDayIdx].sales == null;
+    if (lastDayMissing && new Date().getDate() <= 2) return; // give the outlet a short window to catch up on the missing day
+
     const s = st.settings;
     let wdSales=0, weSales=0, wdPromoQty=0, weRegQty=0, wePremQty=0, regularQty=0, addOnQty=0, wePromoQty=0, summerSwirlsQty=0;
     for (const r of rows){
