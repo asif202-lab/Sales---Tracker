@@ -1644,7 +1644,7 @@
   function wdPromoLabelForMonth(monthKeyStr){
     if (!monthKeyStr || monthKeyStr > WDPROMO_RENAME_MONTH) return 'Jan Hom';
     if (monthKeyStr < WDPROMO_RENAME_MONTH) return 'Thainamite Promo';
-    return 'Thainamite Promo / Jan Hom'; // the rename month itself spans both names
+    return 'Thainamite promo and Jan Hom'; // the rename month itself spans both names
   }
   function wdPromoLabelForDay(monthKeyStr, dayNum){
     if (monthKeyStr !== WDPROMO_RENAME_MONTH) return wdPromoLabelForMonth(monthKeyStr);
