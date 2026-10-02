@@ -48,7 +48,7 @@
   <a id="bst-contact-banner" href="#" target="_blank" style="display:block;background:#1F4E78;color:#fff;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer">
     Managed by Asif — click here to reach out for access or any queries.
   </a>
-  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: indefinite-hold-v93)</span></h2>
+  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: janhom-rename-v94)</span></h2>
 
   <div class="bst-card" id="bst-landing-gate">
     <div class="bst-title">Enter your password</div>
@@ -1692,11 +1692,11 @@
   let promoSubMode = 'live';
   let promoLiveViewMode = 'table';
 
-  function categoryDefsFor(def){
+  function categoryDefsFor(def, monthKeyStr){
     const s = state[def.id].settings;
     if (def.kind === 'simple') return [['Regular', 'regular', resolveQty(s,'regularQty','regularPromoPct',s.regularPrice), s.regularPrice], ['Add On', 'addOn', resolveQty(s,'addOnQty','addOnPromoPct',s.addOnPrice), s.addOnPrice]];
     if (def.kind === 'trd') return [['Weekday Promo', 'wdPromo', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPromoPrice), s.wdPromoPrice], ['Weekend Promo', 'wePromo', resolveQty(s,'wePromoQty','wePromoPct',s.wePromoPrice), s.wePromoPrice], ['Summer Swirls', 'summerSwirls', resolveQty(s,'summerSwirlsQty','summerSwirlsPct',s.summerSwirlsPrice), s.summerSwirlsPrice]];
-    return [[LBKK_CAT_LABELS.wdPromo, 'wdPromo', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice), s.wdPrice], [LBKK_CAT_LABELS.weReg, 'weReg', resolveQty(s,'weRegQty','weRegPct',s.regPrice), s.regPrice], [LBKK_CAT_LABELS.wePrem, 'wePrem', resolveQty(s,'wePremQty','wePremPct',s.premPrice), s.premPrice]];
+    return [[wdPromoLabelForMonth(monthKeyStr), 'wdPromo', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice), s.wdPrice], [LBKK_CAT_LABELS.weReg, 'weReg', resolveQty(s,'weRegQty','weRegPct',s.regPrice), s.regPrice], [LBKK_CAT_LABELS.wePrem, 'wePrem', resolveQty(s,'wePremQty','wePremPct',s.premPrice), s.premPrice]];
   }
 
   async function renderDashboardPromo(){
@@ -1752,7 +1752,7 @@
       addMonthArrows(monthSel);
     }
     const targetMonthKey = monthSel.value;
-    const catDefs = categoryDefsFor(def);
+    const catDefs = categoryDefsFor(def, targetMonthKey);
     wrap.innerHTML = `
       <p class="bst-note" style="margin-top:0">Importing for ${monthLabel(targetMonthKey)} - existing sales/delivery data for those days is kept, only the categories below are filled in.</p>
       ${catDefs.map(([label,kind])=>`
@@ -1847,7 +1847,7 @@
     const cards = await Promise.all(defsToShow.map(async def=>{
       const name = state[def.id].settings.outletName || def.defaultSettings.outletName;
       const monthData = await resolveBreakdownMonthData(def, 'current');
-      const catDefs = categoryDefsFor(def);
+      const catDefs = categoryDefsFor(def, currentKey);
       const weeks = weeklyBreakdown(def, monthData, currentKey);
       let tableRows = '';
       const monthlyTarget = state[def.id].settings.monthlyTarget || 0;
@@ -1932,13 +1932,14 @@
       if (!row) return '';
       const dow = new Date(y2, m2-1, dayNum).getDay();
       const isWeekend = dow===5 || dow===6 || dow===0;
+      const cellMonthKey = y2 + '-' + String(m2).padStart(2,'0');
       const parts = [];
       catDefs.forEach(([label, kind])=>{
         const dayType = CATEGORY_DAY_TYPE[kind] || 'any';
         const applies = dayType==='any' || (dayType==='weekend' && isWeekend) || (dayType==='weekday' && !isWeekend);
         if (!applies) return;
         const qty = kind==='wdPromo' || kind==='weReg' || kind==='regular' ? row.regular : (kind==='wePrem' || kind==='wePromo' ? row.premium : row.addOn);
-        const shortLabel = CATEGORY_SHORT_LABEL[kind] || label.split(' ')[0];
+        const shortLabel = kind==='wdPromo' && def.kind!=='trd' ? wdPromoLabelForDay(cellMonthKey, dayNum).split(' ')[0] : (CATEGORY_SHORT_LABEL[kind] || label.split(' ')[0]);
         parts.push(`<div style="font-size:10px;line-height:1.4">${shortLabel}: <b>${qty!=null?qty:(row.sales!=null?0:'-')}</b></div>`);
       });
       return parts.join('');
@@ -2010,7 +2011,7 @@
       const weeksA = sameMonth ? null : weeklyBreakdown(def, dataA, keyA);
       const weeksB = weeklyBreakdown(def, dataB, keyB);
       const remainingDaysB = isBCurrent ? Math.max(daysInMonth(keyB) - daysElapsedOfType(state[def.id].rows, ()=>true), 0) : 0;
-      const catDefs = categoryDefsFor(def);
+      const catDefs = categoryDefsFor(def, keyB);
       let tableRows = '';
       catDefs.forEach(([label,kind,qty,price])=>{
         const achB = dataB ? dataB.cat[kind].aed : null, pcsB = dataB ? dataB.cat[kind].pcs : null;
@@ -2498,7 +2499,7 @@
     } else if (def.kind === 'trd'){
       catDefs = [['Weekday Promo', 'wdPromo', 'wdPromoQty', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPromoPrice), s.wdPromoPrice], ['Weekend Promo', 'wePromo', 'wePromoQty', resolveQty(s,'wePromoQty','wePromoPct',s.wePromoPrice), s.wePromoPrice], ['Summer Swirls', 'summerSwirls', 'summerSwirlsQty', resolveQty(s,'summerSwirlsQty','summerSwirlsPct',s.summerSwirlsPrice), s.summerSwirlsPrice]];
     } else {
-      catDefs = [[LBKK_CAT_LABELS.wdPromo, 'wdPromo', 'wdPromoQty', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice), s.wdPrice], [LBKK_CAT_LABELS.weReg, 'weReg', 'weRegQty', resolveQty(s,'weRegQty','weRegPct',s.regPrice), s.regPrice], [LBKK_CAT_LABELS.wePrem, 'wePrem', 'wePremQty', resolveQty(s,'wePremQty','wePremPct',s.premPrice), s.premPrice]];
+      catDefs = [[wdPromoLabelForMonth(targetKey), 'wdPromo', 'wdPromoQty', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice), s.wdPrice], [LBKK_CAT_LABELS.weReg, 'weReg', 'weRegQty', resolveQty(s,'weRegQty','weRegPct',s.regPrice), s.regPrice], [LBKK_CAT_LABELS.wePrem, 'wePrem', 'wePremQty', resolveQty(s,'wePremQty','wePremPct',s.premPrice), s.premPrice]];
     }
 
     const rows = [];
@@ -3393,9 +3394,25 @@
     return {html:`<span class="bst-pill bst-pill-bad">-${amountText} total${perDayText}</span>`, cls:'bst-bad'};
   }
 
-  const LBKK_CAT_LABELS = { wdPromo: 'Duck & Dimsum promo', weReg: 'Unli. Weekend', wePrem: 'Weekend Premium' };
+  // LBKK's weekday promo was renamed mid-month: "Thainamite Promo" through Sep 18, 2026,
+  // "Jan Hom" from Sep 19, 2026 onwards. These two functions give the correct label for a
+  // whole month (used anywhere the view shows one month at a time) or a specific day (used in
+  // the calendar view, which can show both names within September itself).
+  const WDPROMO_RENAME_MONTH = '2026-09';
+  const WDPROMO_RENAME_CUTOFF_DAY = 18; // last day still called Thainamite Promo
+  function wdPromoLabelForMonth(monthKeyStr){
+    if (!monthKeyStr || monthKeyStr > WDPROMO_RENAME_MONTH) return 'Jan Hom';
+    if (monthKeyStr < WDPROMO_RENAME_MONTH) return 'Thainamite Promo';
+    return 'Thainamite Promo / Jan Hom'; // the rename month itself spans both names
+  }
+  function wdPromoLabelForDay(monthKeyStr, dayNum){
+    if (monthKeyStr !== WDPROMO_RENAME_MONTH) return wdPromoLabelForMonth(monthKeyStr);
+    return dayNum <= WDPROMO_RENAME_CUTOFF_DAY ? 'Thainamite Promo' : 'Jan Hom';
+  }
+
+  const LBKK_CAT_LABELS = { wdPromo: 'Jan Hom', weReg: 'Unli. Weekend', wePrem: 'Weekend Premium' };
   const CATEGORY_DAY_TYPE = { wdPromo: 'weekday', weReg: 'weekend', wePrem: 'weekend', wePromo: 'weekend', regular: 'any', addOn: 'any', summerSwirls: 'any' };
-  const CATEGORY_SHORT_LABEL = { wdPromo: 'Duck', weReg: 'Unli', wePrem: 'Premium', wePromo: 'Weekend', regular: 'Regular', addOn: 'Add On', summerSwirls: 'Swirls' };
+  const CATEGORY_SHORT_LABEL = { wdPromo: 'Jan Hom', weReg: 'Unli', wePrem: 'Premium', wePromo: 'Weekend', regular: 'Regular', addOn: 'Add On', summerSwirls: 'Swirls' };
   function promoStatsLine(def){
     const st = state[def.id];
     const s = st.settings, rows = st.rows;
@@ -3420,7 +3437,7 @@
       ];
     } else {
       cats = [
-        [LBKK_CAT_LABELS.wdPromo, 'wdPromo', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice)*s.wdPrice, wdElapsed, wdTotal, s.wdPrice],
+        [wdPromoLabelForMonth(st.currentMonthKey), 'wdPromo', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice)*s.wdPrice, wdElapsed, wdTotal, s.wdPrice],
         [LBKK_CAT_LABELS.weReg, 'weReg', resolveQty(s,'weRegQty','weRegPct',s.regPrice)*s.regPrice, weElapsed, weTotal, s.regPrice],
         [LBKK_CAT_LABELS.wePrem, 'wePrem', resolveQty(s,'wePremQty','wePremPct',s.premPrice)*s.premPrice, weElapsed, weTotal, s.premPrice],
       ];
@@ -3525,7 +3542,7 @@
       const weElapsed = daysElapsedOfType(rows, r=>r.weekend);
       const totalElapsed = daysElapsedOfType(rows, ()=>true);
       cats = [
-        [LBKK_CAT_LABELS.wdPromo, resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice), 'wdPromo', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice)*s.wdPrice, wdElapsed, wdTotal, s.wdPrice],
+        [wdPromoLabelForMonth(st.currentMonthKey), resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice), 'wdPromo', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice)*s.wdPrice, wdElapsed, wdTotal, s.wdPrice],
         [LBKK_CAT_LABELS.weReg, resolveQty(s,'weRegQty','weRegPct',s.regPrice), 'weReg', resolveQty(s,'weRegQty','weRegPct',s.regPrice)*s.regPrice, weElapsed, weTotal, s.regPrice],
         [LBKK_CAT_LABELS.wePrem, resolveQty(s,'wePremQty','wePremPct',s.premPrice), 'wePrem', resolveQty(s,'wePremQty','wePremPct',s.premPrice)*s.premPrice, weElapsed, weTotal, s.premPrice],
         ['A la carte (remainder)', null, 'ala', alaTargetAED(s), totalElapsed, totalDays, null],
