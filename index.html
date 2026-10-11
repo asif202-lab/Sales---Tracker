@@ -48,7 +48,7 @@
   <a id="bst-contact-banner" href="#" target="_blank" style="display:block;background:#1F4E78;color:#fff;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer">
     Managed by Asif — click here to reach out for access or any queries.
   </a>
-  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: janhom-wording-v95)</span></h2>
+  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: projection-v96)</span></h2>
 
   <div class="bst-card" id="bst-landing-gate">
     <div class="bst-title">Enter your password</div>
@@ -161,6 +161,7 @@
           <select id="bst-breakdown-month-b" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border-strong,#c3c2b7);font-size:13px"></select>
         </div>
         <p class="bst-note" style="margin-top:0">Shown in real AED amounts, with piece counts for promo categories. Each achieved figure is flagged red if it's behind the comparison month, and green if it's on or ahead of target pace (target pace only applies when the achieved side is the current month) - these are shown separately since an outlet can be true on one and not the other.</p>
+        <div id="bst-breakdown-prediction"></div>
         <table class="bst-tbl">
           <thead><tr><th style="text-align:left">Category</th><th id="bst-breakdown-col-1"></th><th id="bst-breakdown-col-2"></th><th id="bst-breakdown-col-3">Variance</th></tr></thead>
           <tbody id="bst-dash-breakdown-body"></tbody>
@@ -1301,7 +1302,7 @@
     const perDayAvg = daysElapsed ? cumAchieved/daysElapsed : null;
     let onTrack = null, projected = null, gapPct = null, gapAmount = null, gapAmountPerDay = null, remainingNeeded = null;
     if (hasTarget && daysElapsed>0){
-      projected = (cumAchieved/daysElapsed)*totalDays; // still shown for month-comparison context
+      projected = projectedMonthEnd(rows, channel, cumAchieved, daysElapsed, totalDays); // still shown for month-comparison context
       // Expected-to-date: what should have been achieved by now if spread evenly across the
       // days elapsed - far more stable than extrapolating a full month from just a few days.
       const expectedToDate = target * (daysElapsed/Math.max(totalDays,1));
@@ -1313,7 +1314,7 @@
       const remainingDays = Math.max(totalDays - daysElapsed, 0);
       gapAmountPerDay = remainingDays > 0 ? remainingNeeded / remainingDays : remainingNeeded;
     } else if (daysElapsed>0){
-      projected = (cumAchieved/daysElapsed)*totalDays; // still useful for month-comparison "current" projections
+      projected = projectedMonthEnd(rows, channel, cumAchieved, daysElapsed, totalDays); // still useful for month-comparison "current" projections
     }
 
     // Momentum: compare the average of the last 5 entered days against the average of all
@@ -1673,6 +1674,109 @@
     return weeks;
   }
 
+
+  // ---- Month-end prediction (weekday / weekend aware) ----------------------------------
+  // Weekdays and weekends are projected separately, each at its own average daily sales so
+  // far, so a month that starts with a few strong weekend days isn't overstated. Remaining
+  // days = every day of that type in the month that has not been entered yet.
+  function kindsFor(def){ return def.kind==='simple' ? ['regular','addOn'] : (def.kind==='trd' ? ['wdPromo','wePromo','summerSwirls'] : ['wdPromo','weReg','wePrem']); }
+  function cumFnFor(def){ return def.kind==='simple' ? cumCategoryAchievedSimple : (def.kind==='trd' ? cumCategoryAchievedTRD : cumCategoryAchieved); }
+
+  function projectSalesFromRows(rows, channel){
+    channel = channel || 'dinein';
+    const counts = dynamicDayCounts(rows);
+    let wdAch=0, weAch=0, wdEl=0, weEl=0;
+    for (const r of rows){
+      if (!r || r.notInMonth) continue;
+      const amt = channelAmount(r, channel);
+      if (amt==null) continue;
+      if (r.weekend){ weAch+=amt; weEl++; } else { wdAch+=amt; wdEl++; }
+    }
+    const elapsed = wdEl+weEl;
+    if (!elapsed) return null;
+    const achieved = wdAch+weAch;
+    const avgAll = achieved/elapsed;
+    const wdRem = Math.max(counts.wd-wdEl,0), weRem = Math.max(counts.we-weEl,0);
+    const wdAvg = wdEl ? wdAch/wdEl : avgAll, weAvg = weEl ? weAch/weEl : avgAll;
+    const wdProj = wdAch + wdAvg*wdRem, weProj = weAch + weAvg*weRem;
+    return {achieved, elapsed, wdEl, weEl, wdTotal:counts.wd, weTotal:counts.we, totalDays:counts.total,
+      remainingDays: wdRem+weRem, wdRem, weRem, wdAch, weAch, wdProj, weProj, projected: wdProj+weProj,
+      wdAvg, weAvg, estimatedType: (!wdEl || !weEl)};
+  }
+  function projectedMonthEnd(rows, channel, cumAchieved, daysElapsed, totalDays){
+    const p = projectSalesFromRows(rows, channel);
+    return p ? p.projected : (cumAchieved/daysElapsed)*totalDays;
+  }
+  function projectCategories(def, rows){
+    const s = state[def.id].settings;
+    const cumFn = cumFnFor(def);
+    const counts = dynamicDayCounts(rows);
+    const wdEl = daysElapsedOfType(rows, r=>!r.weekend && !r.notInMonth);
+    const weEl = daysElapsedOfType(rows, r=>r.weekend && !r.notInMonth);
+    const out = {};
+    kindsFor(def).forEach(kind=>{
+      const type = CATEGORY_DAY_TYPE[kind] || 'any';
+      const el = type==='weekday' ? wdEl : (type==='weekend' ? weEl : wdEl+weEl);
+      const tot = type==='weekday' ? counts.wd : (type==='weekend' ? counts.we : counts.total);
+      const ach = cumFn(s, rows, kind);
+      out[kind] = el ? {ach, proj: ach/el*tot, el, tot, rem: Math.max(tot-el,0)} : {ach, proj:null, el:0, tot, rem: tot};
+    });
+    return out;
+  }
+  // Variance cell for a projected month-end figure vs its target, plus what is still needed
+  // per remaining day (or pieces per day for promo categories) to actually reach the target.
+  function projectedVarianceCell(proj, target, price, ach, remDays){
+    if (proj==null) return `<span class="bst-note" style="margin:0">Not started</span>`;
+    const v = proj - target, over = v >= 0;
+    const cls = over ? 'bst-good' : 'bst-bad';
+    const amt = price ? Math.round(Math.abs(v)/price)+' pcs' : fmtAED(Math.abs(v)) + (target ? ' ('+fmtPct(Math.abs(v)/target)+')' : '');
+    const shortfall = Math.max(target-ach, 0);
+    let need = '';
+    if (shortfall<=0) need = 'Target already reached';
+    else if (remDays>0) need = price ? Math.round(shortfall/price/remDays)+' pcs/day needed' : fmtAED(shortfall/remDays)+'/day needed';
+    return `<div class="${cls}" style="font-weight:600">Projected ${over?'ahead':'short'} ${amt}</div>` +
+      (need ? `<div style="font-size:11px;font-weight:400;margin-top:2px">${need}</div>` : '');
+  }
+  function projectedLine(proj){
+    return proj==null ? '' : `<div style="font-size:11px;color:var(--text-muted,#898781);margin-top:2px">Projected ${fmtAED(proj)}</div>`;
+  }
+  // Prediction card: every outlet in `defs` plus a combined total, dine-in & TA vs target.
+  function predictionCardHTML(defs){
+    let tT=0, tA=0, tP=0, tRem=0, started=0, anyEstimated=false, maxElapsed=0, minElapsed=Infinity;
+    const body = defs.map(def=>{
+      const st = state[def.id], s = st.settings;
+      const name = s.outletName || def.defaultSettings.outletName;
+      const target = s.monthlyTarget || 0;
+      const p = projectSalesFromRows(st.rows, 'dinein');
+      if (!p) return `<tr><td style="text-align:left;font-weight:600">${name}</td><td>${fmtAED(target)}</td><td colspan="4"><span class="bst-note" style="margin:0">No sales entered yet</span></td></tr>`;
+      started++; tT+=target; tA+=p.achieved; tP+=p.projected; tRem+=p.remainingDays;
+      if (p.estimatedType) anyEstimated = true;
+      maxElapsed = Math.max(maxElapsed, p.elapsed); minElapsed = Math.min(minElapsed, p.elapsed);
+      const v = p.projected - target, over = v >= 0;
+      const shortfall = Math.max(target - p.achieved, 0);
+      const perDay = shortfall<=0 ? 'Target reached' : (p.remainingDays>0 ? fmtAED(shortfall/p.remainingDays)+'/day' : fmtAED(shortfall));
+      return `<tr><td style="text-align:left;font-weight:600">${name}${p.estimatedType?' *':''}</td><td>${fmtAED(target)}</td>
+        <td>${fmtAED(p.achieved)}<div style="font-size:11px;color:var(--text-muted,#898781)">${p.elapsed} of ${p.totalDays} days</div></td>
+        <td style="font-weight:600">${fmtAED(p.projected)}<div style="font-size:11px;font-weight:400;color:var(--text-muted,#898781)">${target?fmtPct(p.projected/target)+' of target':''}</div></td>
+        <td class="${over?'bst-good':'bst-bad'}" style="font-weight:600">${over?'Ahead':'Short'} ${fmtAED(Math.abs(v))}</td>
+        <td>${perDay}</td></tr>`;
+    });
+    if (!started) return '';
+    const tv = tP - tT, tOver = tv >= 0;
+    const tShort = Math.max(tT - tA, 0);
+    const tPerDay = tShort<=0 ? 'Target reached' : (tRem>0 ? fmtAED(tShort/tRem)+'/day (all outlets)' : fmtAED(tShort));
+    const total = defs.length>1 ? `<tr style="font-weight:700;border-top:2px solid #1F4E78"><td style="text-align:left">All outlets combined</td><td>${fmtAED(tT)}</td><td>${fmtAED(tA)}</td>
+        <td>${fmtAED(tP)}<div style="font-size:11px;font-weight:400;color:var(--text-muted,#898781)">${tT?fmtPct(tP/tT)+' of target':''}</div></td>
+        <td class="${tOver?'bst-good':'bst-bad'}">${tOver?'Ahead':'Short'} ${fmtAED(Math.abs(tv))}</td><td>${tPerDay}</td></tr>` : '';
+    const monthName = monthLabel(monthKey(new Date()));
+    const earlyNote = minElapsed < 7 ? ' Early in the month, so treat this as a rough estimate.' : '';
+    const estNote = anyEstimated ? ' * No weekday or no weekend days entered yet, so that day type uses the overall average.' : '';
+    return `<div class="bst-card" style="margin-bottom:1rem"><div class="bst-title" style="margin:0">Month-end prediction - ${monthName}</div>
+      <p class="bst-note" style="margin-top:.25rem">Dine in &amp; TA Net sale, based on the days entered so far. Weekdays and weekends are projected separately at their own daily average; the remaining days of each type are filled at that average.${earlyNote}${estNote}</p>
+      <div style="overflow-x:auto"><table class="bst-tbl"><thead><tr><th style="text-align:left">Outlet</th><th>Target</th><th>Achieved so far</th><th>Projected month-end</th><th>Projected vs target</th><th>Needed per day to hit target</th></tr></thead>
+      <tbody>${body.join('')}${total}</tbody></table></div></div>`;
+  }
+
   function varianceCell(varAED, varPct, price, remainingDays){
     if (varAED == null) return `<span class="bst-note" style="margin:0">-</span>`;
     const over = varAED >= 0;
@@ -2002,6 +2106,7 @@
     const sameMonth = keyA === keyB;
     const labelA = monthLabel(keyA), labelB = monthLabel(keyB);
     const isBCurrent = keyB === monthKey(new Date());
+    const projecting = sameMonth && isBCurrent; // same month still in progress -> month-end prediction
     document.getElementById('bst-promo-col-a') && (document.getElementById('bst-promo-col-a').textContent = sameMonth ? 'Target' : labelA+' achieved');
 
     const cards = await Promise.all(defsToShow.map(async def=>{
@@ -2012,6 +2117,7 @@
       const weeksB = weeklyBreakdown(def, dataB, keyB);
       const remainingDaysB = isBCurrent ? Math.max(daysInMonth(keyB) - daysElapsedOfType(state[def.id].rows, ()=>true), 0) : 0;
       const catDefs = categoryDefsFor(def, keyB);
+      const catProj = (projecting && dataB && dataB.rows) ? projectCategories(def, dataB.rows) : null;
       let tableRows = '';
       catDefs.forEach(([label,kind,qty,price])=>{
         const achB = dataB ? dataB.cat[kind].aed : null, pcsB = dataB ? dataB.cat[kind].pcs : null;
@@ -2024,8 +2130,14 @@
           const varAED = achB!=null ? achB-targetAED : null;
           const varPct = (varAED!=null && targetAED) ? varAED/targetAED : null;
           const cell1 = breakdownCell(targetAED, null, qty, '');
-          const cell2 = achB!=null ? breakdownCell(achB, pctB, pcsB, '') : breakdownCell(null,null,null,'Not started');
-          tableRows += `<tr><td style="text-align:left;font-weight:600">${label}</td><td>${cell1}</td><td>${cell2}</td><td>${varianceCell(varAED, varPct, price, remainingDaysB)}</td></tr>`;
+          let cell2 = achB!=null ? breakdownCell(achB, pctB, pcsB, '') : breakdownCell(null,null,null,'Not started');
+          let cell3 = varianceCell(varAED, varPct, price, remainingDaysB);
+          if (projecting){
+            const pc = catProj ? catProj[kind] : null;
+            cell2 += projectedLine(pc ? pc.proj : null);
+            cell3 = projectedVarianceCell(pc ? pc.proj : null, targetAED, price, achB||0, pc ? pc.rem : 0);
+          }
+          tableRows += `<tr><td style="text-align:left;font-weight:600">${label}</td><td>${cell1}</td><td>${cell2}</td><td>${cell3}</td></tr>`;
           if (weeksB){
             weeksB.forEach((wB,i)=>{
               if (!wB.catLabels[kind]) return;
@@ -2071,9 +2183,9 @@
       });
       const col1Label = sameMonth ? 'Target' : labelA+' achieved';
       return `<div class="bst-card" style="margin-bottom:1rem"><div class="bst-title" style="margin:0">${name}</div>
-        <table class="bst-tbl" style="margin-top:.5rem"><thead><tr><th style="text-align:left">Category</th><th>${col1Label}</th><th>${labelB} achieved</th><th>Variance</th></tr></thead><tbody>${tableRows}</tbody></table></div>`;
+        <table class="bst-tbl" style="margin-top:.5rem"><thead><tr><th style="text-align:left">Category</th><th>${col1Label}</th><th>${labelB} achieved</th><th>${projecting?'Projected variance (month-end)':'Variance'}</th></tr></thead><tbody>${tableRows}</tbody></table></div>`;
     }));
-    document.getElementById('bst-promo-compare-body').innerHTML = cards.join('');
+    document.getElementById('bst-promo-compare-body').innerHTML = (projecting ? predictionCardHTML(defsToShow) : '') + cards.join('');
   }
 
   async function renderDashboardBreakdown(){
@@ -2087,9 +2199,14 @@
     const selectionB = normalizeSelection(selB ? selB.value : '');
     const sameMonth = selectionA === selectionB;
     const isBCurrentMonth = selectionB === 'current' || selectionB === monthKey(new Date());
+    const projecting = sameMonth && isBCurrentMonth; // same month, still in progress -> show month-end prediction
 
     const col1El = document.getElementById('bst-breakdown-col-1');
     const col2El = document.getElementById('bst-breakdown-col-2');
+    const col3El = document.getElementById('bst-breakdown-col-3');
+    if (col3El) col3El.textContent = projecting ? 'Projected variance (month-end)' : 'Variance';
+    const predEl = document.getElementById('bst-breakdown-prediction');
+    if (predEl) predEl.innerHTML = projecting ? predictionCardHTML(outletDefs.filter(def => filter==='all' || filter===def.id)) : '';
     if (sameMonth){
       col1El.textContent = 'Target';
       col2El.textContent = 'Achieved in ' + monthLabel(selectionB);
@@ -2116,9 +2233,12 @@
         const weAchAED = dataB ? dataB.we : null;
         const wdVar = wdAchAED!=null ? wdAchAED-wdTargetAED : null;
         const weVar = weAchAED!=null ? weAchAED-weTargetAED : null;
+        const pj = projecting ? projectSalesFromRows(state[def.id].rows, 'dinein') : null;
         const cell1 = `<div>${breakdownCell(wdTargetAED, null, null, '')} <span class="bst-note" style="margin:0">Weekday</span></div><div style="margin-top:8px">${breakdownCell(weTargetAED, null, null, '')} <span class="bst-note" style="margin:0">Weekend</span></div>`;
-        const cell2 = `<div>${wdAchAED!=null?breakdownCell(wdAchAED, wdTargetAED?wdAchAED/wdTargetAED:null, null, ''):breakdownCell(null,null,null,'Not started')} <span class="bst-note" style="margin:0">Weekday</span></div><div style="margin-top:8px">${weAchAED!=null?breakdownCell(weAchAED, weTargetAED?weAchAED/weTargetAED:null, null, ''):breakdownCell(null,null,null,'Not started')} <span class="bst-note" style="margin:0">Weekend</span></div>`;
-        const cell3 = `<div>${varianceCell(wdVar, wdTargetAED?wdVar/wdTargetAED:null)}</div><div style="margin-top:8px">${varianceCell(weVar, weTargetAED?weVar/weTargetAED:null)}</div>`;
+        const cell2 = `<div>${wdAchAED!=null?breakdownCell(wdAchAED, wdTargetAED?wdAchAED/wdTargetAED:null, null, ''):breakdownCell(null,null,null,'Not started')} <span class="bst-note" style="margin:0">Weekday</span>${pj?projectedLine(pj.wdProj):''}</div><div style="margin-top:8px">${weAchAED!=null?breakdownCell(weAchAED, weTargetAED?weAchAED/weTargetAED:null, null, ''):breakdownCell(null,null,null,'Not started')} <span class="bst-note" style="margin:0">Weekend</span>${pj?projectedLine(pj.weProj):''}</div>`;
+        const cell3 = pj
+          ? `<div>${projectedVarianceCell(pj.wdProj, wdTargetAED, null, wdAchAED||0, pj.wdRem)}</div><div style="margin-top:8px">${projectedVarianceCell(pj.weProj, weTargetAED, null, weAchAED||0, pj.weRem)}</div>`
+          : `<div>${varianceCell(wdVar, wdTargetAED?wdVar/wdTargetAED:null)}</div><div style="margin-top:8px">${varianceCell(weVar, weTargetAED?weVar/weTargetAED:null)}</div>`;
         poolRow = `<tr><td style="text-align:left;padding-left:1.5rem;vertical-align:top">Weekday / Weekend split</td><td>${cell1}</td><td>${cell2}</td><td>${cell3}</td></tr>`;
       } else {
         const wdA = dataA ? dataA.wd : null, weA = dataA ? dataA.we : null;
@@ -2140,6 +2260,7 @@
         catDefs = [['Weekday Promo', 'wdPromo', resolveQty(s,'wdPromoQty','wdPromoPct',s.wdPrice), s.wdPrice], ['Weekend Regular', 'weReg', resolveQty(s,'weRegQty','weRegPct',s.regPrice), s.regPrice], ['Weekend Premium', 'wePrem', resolveQty(s,'wePremQty','wePremPct',s.premPrice), s.premPrice]];
       }
 
+      const catProj = (projecting && dataB && dataB.rows) ? projectCategories(def, dataB.rows) : null;
       const catRows = catDefs.map(([label,kind,qty,price])=>{
         const bEntry = dataB ? dataB.cat[kind] : null;
         const achB = bEntry ? bEntry.aed : null;
@@ -2150,8 +2271,13 @@
           const varAED = achB!=null ? achB-targetAED : null;
           const varPct = (varAED!=null && targetAED) ? varAED/targetAED : null;
           const cell1 = breakdownCell(targetAED, null, qty, '');
-          const cell2 = achB!=null ? breakdownCell(achB, achPct, pcsB, '') : breakdownCell(null,null,null,'Not started');
-          const cell3 = varianceCell(varAED, varPct, price);
+          let cell2 = achB!=null ? breakdownCell(achB, achPct, pcsB, '') : breakdownCell(null,null,null,'Not started');
+          let cell3 = varianceCell(varAED, varPct, price);
+          if (projecting){
+            const pc = catProj ? catProj[kind] : null;
+            cell2 += projectedLine(pc ? pc.proj : null);
+            cell3 = projectedVarianceCell(pc ? pc.proj : null, targetAED, price, achB||0, pc ? pc.rem : 0);
+          }
           return `<tr><td style="text-align:left;padding-left:1.5rem;vertical-align:top">${label}</td><td>${cell1}</td><td>${cell2}</td><td>${cell3}</td></tr>`;
         } else {
           const aEntry = dataA ? dataA.cat[kind] : null;
@@ -2174,10 +2300,15 @@
         const achPct = (achAlaB!=null && alaTarget) ? achAlaB/alaTarget : null;
         const varAED = achAlaB!=null ? achAlaB-alaTarget : null;
         const varPct = (varAED!=null && alaTarget) ? varAED/alaTarget : null;
+        let alaProj = null, alaRem = 0;
+        if (projecting && dataB && dataB.rows && achAlaB!=null){
+          const pjA = projectSalesFromRows(dataB.rows, 'dinein');
+          if (pjA && pjA.elapsed){ alaProj = achAlaB/pjA.elapsed*pjA.totalDays; alaRem = pjA.remainingDays; }
+        }
         alaRow = `<tr><td style="text-align:left;padding-left:1.5rem;vertical-align:top">A la carte (remainder)</td>` +
           `<td>${breakdownCell(alaTarget, null, null, '')}</td>` +
-          `<td>${achAlaB!=null?breakdownCell(achAlaB, achPct, null, ''):breakdownCell(null,null,null,'Not started')}</td>` +
-          `<td>${varianceCell(varAED, varPct)}</td></tr>`;
+          `<td>${achAlaB!=null?breakdownCell(achAlaB, achPct, null, ''):breakdownCell(null,null,null,'Not started')}${projecting?projectedLine(alaProj):''}</td>` +
+          `<td>${projecting?projectedVarianceCell(alaProj, alaTarget, null, achAlaB||0, alaRem):varianceCell(varAED, varPct)}</td></tr>`;
       } else {
         const achAlaA = dataA ? dataA.total - Object.values(dataA.cat).reduce((sum,c)=>sum+c.aed,0) : null;
         const varAED = (achAlaA!=null && achAlaB!=null) ? achAlaB-achAlaA : null;
