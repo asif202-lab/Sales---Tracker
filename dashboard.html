@@ -204,7 +204,7 @@
         </div>
         <p class="bst-note" style="margin-top:0" id="bst-compare-note">Any month you pick as the current month uses the current pace projected to a full month, so it's a fair comparison. Completed months show their real final total. Day/week comparisons only work for the current month and months archived after this update - older months only have a single total saved.</p>
         <table class="bst-tbl">
-          <thead><tr><th style="text-align:left">Outlet</th><th id="bst-compare-col-a">Month A (AED)</th><th id="bst-compare-col-b">Month B (AED)</th><th>Change</th></tr></thead>
+          <thead><tr><th style="text-align:left">Outlet</th><th id="bst-compare-col-a">Month A (AED)</th><th id="bst-compare-col-b">Month B (AED)</th><th id="bst-compare-col-c">Change</th></tr></thead>
           <tbody id="bst-dash-compare-body"></tbody>
         </table>
       </div>
@@ -2431,6 +2431,46 @@
     if (granularity === 'month' && wdActive !== weActive) weekendFilter = weActive;
 
     const body = document.getElementById('bst-dash-compare-body');
+
+    // Current month against current month: comparing a month with itself is always 0, so show
+    // the ongoing sales against the target instead, with the projected month-end and variance.
+    const sameCurrent = a === 'current' && b === 'current' && granularity === 'month' && weekendFilter === null;
+    const colCEl = document.getElementById('bst-compare-col-c');
+    const noteEl = document.getElementById('bst-compare-note');
+    if (noteEl && !noteEl.dataset.orig) noteEl.dataset.orig = noteEl.textContent;
+    if (colCEl) colCEl.textContent = sameCurrent ? 'Projected month-end vs target' : 'Change';
+    if (noteEl) noteEl.textContent = sameCurrent
+      ? 'Same month selected on both sides, so this shows the month in progress against its target. Projected month-end counts weekdays and weekends separately at their own daily average, and fills the days not yet entered at that average.'
+      : noteEl.dataset.orig;
+    if (sameCurrent){
+      document.getElementById('bst-compare-col-a').textContent = 'Target - '+labelFor(a)+' (AED)';
+      document.getElementById('bst-compare-col-b').textContent = 'Achieved so far (AED)';
+      let tT=0, tA=0, tP=0, tRem=0;
+      const out = outletDefs.map(def=>{
+        const sum = outletSummary(def, currentChannel);
+        const cellA = sum.target!=null ? fmtAED(sum.target) : 'No target set';
+        const cellB = sum.daysElapsed ? fmtAED(sum.achieved)+`<div style="font-size:11px;color:var(--text-muted,#898781)">${sum.daysElapsed} days entered</div>` : 'Not started';
+        let cellC = '-', cls = '';
+        if (sum.target!=null && sum.projected!=null){
+          const remDays = Math.max(dynamicDayCounts(state[def.id].rows).total - sum.daysElapsed, 0);
+          const v = sum.projected - sum.target, over = v >= 0;
+          const shortfall = Math.max(sum.target - sum.achieved, 0);
+          const need = shortfall<=0 ? 'Target already reached' : (remDays>0 ? fmtAED(shortfall/remDays)+'/day needed' : fmtAED(shortfall)+' still needed');
+          cls = over ? 'bst-good' : 'bst-bad';
+          cellC = `<div style="font-weight:600">Projected ${fmtAED(sum.projected)} (${fmtPct(sum.projected/sum.target)} of target)</div><div style="font-weight:600">${over?'Ahead':'Short'} ${fmtAED(Math.abs(v))}</div><div style="font-size:11px;font-weight:400">${need}</div>`;
+          tT+=sum.target; tA+=sum.achieved; tP+=sum.projected; tRem+=remDays;
+        }
+        return `<tr><td style="text-align:left">${sum.name}</td><td>${cellA}</td><td>${cellB}</td><td class="${cls}">${cellC}</td></tr>`;
+      });
+      if (tT>0 && outletDefs.length>1){
+        const v = tP - tT, over = v >= 0, shortfall = Math.max(tT - tA, 0);
+        const need = shortfall<=0 ? 'Target already reached' : (tRem>0 ? fmtAED(shortfall/tRem)+'/day needed (all outlets)' : fmtAED(shortfall)+' still needed');
+        out.push(`<tr style="font-weight:700;border-top:2px solid #1F4E78"><td style="text-align:left">All outlets combined</td><td>${fmtAED(tT)}</td><td>${fmtAED(tA)}</td><td class="${over?'bst-good':'bst-bad'}"><div>Projected ${fmtAED(tP)} (${fmtPct(tP/tT)} of target)</div><div>${over?'Ahead':'Short'} ${fmtAED(Math.abs(v))}</div><div style="font-size:11px;font-weight:400">${need}</div></td></tr>`);
+      }
+      body.innerHTML = out.join('');
+      return;
+    }
+
     const rowsHtml = await Promise.all(outletDefs.map(async def=>{
       const sum = outletSummary(def, currentChannel);
       let ra, rb;
