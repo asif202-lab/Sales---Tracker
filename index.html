@@ -48,7 +48,7 @@
   <a id="bst-contact-banner" href="#" target="_blank" style="display:block;background:#1F4E78;color:#fff;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer">
     Managed by Asif — click here to reach out for access or any queries.
   </a>
-  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: projection-v97)</span></h2>
+  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: safety-v99)</span></h2>
 
   <div class="bst-card" id="bst-landing-gate">
     <div class="bst-title">Enter your password</div>
@@ -315,7 +315,7 @@
     const snap = await getDocs(collection(db, KV));
     const result = {};
     snap.forEach(d => {
-      if (d.id.indexOf('archivedrows_') !== 0) result[d.id] = d.data().value;
+      if (d.id.indexOf('archivedrows_') !== 0 && d.id.indexOf('snap_') !== 0) result[d.id] = d.data().value;
     });
     return result;
   };
@@ -815,6 +815,28 @@
     };
   }
 
+
+  // Daily safety copy of an outlet's live month. One document per outlet per day, never deleted
+  // (the database rules forbid deletes) and never replaced by a copy with fewer entered days, so
+  // even if a table is later overwritten the best version of each day can be restored.
+  function ymdLocal(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  async function snapshotRows(def, rows){
+    try{
+      if (!rows) return;
+      const count = rows.filter(r => r && r.sales!=null).length;
+      if (!count) return;
+      const key = 'snap_'+def.storageKey+'_'+ymdLocal();
+      const val = JSON.stringify({monthKey: state[def.id].currentMonthKey, count, savedAt: new Date().toISOString(), rows});
+      let existing = null;
+      try{ const raw = await window.fsGetFresh(key); existing = raw ? JSON.parse(raw) : null; }catch(e){ existing = null; }
+      if (existing){
+        if ((existing.count||0) > count) return;                         // never go backwards
+        if (JSON.stringify(existing.rows) === JSON.stringify(rows)) return; // nothing new to save
+      }
+      await window.fsSet(key, val);
+    }catch(e){}
+  }
+
   async function loadOutlet(def){
     try{
       const s = await storageGet('settings_'+def.storageKey);
@@ -846,6 +868,7 @@
       const cmk = await storageGetFresh('currentmonthkey_'+def.storageKey);
       if (cmk) state[def.id].currentMonthKey = cmk;
     }catch(e){}
+    snapshotRows(def, state[def.id].rows); // safety copy of what is stored right now (not awaited)
     await archiveIfMonthChanged(def);
   }
   async function saveSettings(def){ try{ await storageSet('settings_'+def.storageKey, JSON.stringify(state[def.id].settings)); }catch(e){} }
@@ -862,6 +885,7 @@
       freshRows[dayIndex][field] = value;
       await storageSet('rows_'+def.storageKey, JSON.stringify(freshRows));
       state[def.id].rows = freshRows; // bring this tab's own view back in sync with the merged result
+      snapshotRows(def, freshRows);
     }catch(e){}
   }
   async function saveLastMonth(def){ try{ await storageSet('lastmonth_'+def.storageKey, JSON.stringify(state[def.id].lastMonth)); }catch(e){} }
@@ -895,6 +919,8 @@
       return;
     }
     if (st.currentMonthKey === actualKey) return; // nothing to do
+    // A device whose clock is behind the recorded month must never roll anything over.
+    if (actualKey < st.currentMonthKey) return;
 
     const endingKey = st.currentMonthKey;
     const rows = st.rows;
@@ -933,8 +959,14 @@
           : { wdSales, weSales, wdPromoQty, weRegQty, wePremQty });
       await saveMonthlyHistory(def);
       await saveLastMonth(def);
-      try{ await storageSet('archivedrows_'+def.storageKey+'_'+endingKey, JSON.stringify(rows)); }catch(e){}
+      // The month's daily rows are only cleared once the archive copy is confirmed saved.
+      const archKey = 'archivedrows_'+def.storageKey+'_'+endingKey;
+      const archVal = JSON.stringify(rows);
+      let archived = false;
+      try{ await storageSet(archKey, archVal); archived = (await storageGetFresh(archKey)) === archVal; }catch(e){ archived = false; }
+      if (!archived) return; // leave everything as it is; tried again on the next load
     }
+    await snapshotRows(def, rows);
     st.rows = blankRows(actualKey);
     st.currentMonthKey = actualKey;
     await saveRows(def);
@@ -2866,7 +2898,7 @@
     // Management and master both see target settings directly - no unlock button needed.
     if (unlockBtn) unlockBtn.style.display = 'none';
     if (lockStatus) lockStatus.style.display = 'none';
-    if (resetBtn) resetBtn.style.display = '';
+    if (resetBtn) resetBtn.style.display = accessLevel === 'master' ? '' : 'none'; // master/admin only - not management
     wrap.style.display = st.unlocked ? '' : 'none';
     hiddenNote.style.display = st.unlocked ? 'none' : '';
     if (!st.unlocked){
@@ -4023,8 +4055,10 @@
         renderAll();
       }
     });
-    view.querySelector('[data-action="reset"]').addEventListener('click', ()=>{
+    view.querySelector('[data-action="reset"]').addEventListener('click', async ()=>{
+      if (accessLevel !== 'master') return; // master/admin only
       if (!confirm('Clear all daily entries for this outlet? Settings will be kept.')) return;
+      await snapshotRows(def, state[def.id].rows);
       state[def.id].rows = blankRows(state[def.id].currentMonthKey);
       saveRows(def); renderAll();
     });
