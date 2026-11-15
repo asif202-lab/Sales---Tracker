@@ -48,7 +48,7 @@
   <a id="bst-contact-banner" href="#" target="_blank" style="display:block;background:#1F4E78;color:#fff;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer">
     Managed by Asif — click here to reach out for access or any queries.
   </a>
-  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: safety-v99)</span></h2>
+  <h2 style="font-size:22px;font-weight:500;margin:0 0 1rem">Sales and promo target tracker <span style="font-size:11px;color:#999;font-weight:400">(build: safety-v100)</span></h2>
 
   <div class="bst-card" id="bst-landing-gate">
     <div class="bst-title">Enter your password</div>
@@ -3662,8 +3662,26 @@
     if (!wrap) return;
     const sum = outletSummary(def, 'dinein');
     const s = state[def.id].settings;
+    // Delivery box (management / master only): target, achieved and pending together in one box.
+    let deliveryHtml = '';
+    if (accessLevel === 'master' || accessLevel === 'management'){
+      const dsum = outletSummary(def, 'delivery');
+      if (dsum.hasTarget || dsum.achieved > 0){
+        const line = (label, val) => `<span style="display:block;font-size:13px;font-weight:500;line-height:1.7"><span style="display:inline-block;width:68px;font-weight:400;color:var(--text-muted,#898781)">${label}</span>${val}</span>`;
+        let tgt, ach, pend;
+        if (dsum.hasTarget){
+          const pendingAmt = dsum.target - dsum.achieved;
+          tgt = fmtAED(dsum.target);
+          ach = `${fmtAED(dsum.achieved)} (${fmtPct(dsum.achievedPct)})`;
+          pend = pendingAmt > 0 ? `${fmtAED(pendingAmt)} (${fmtPct(pendingAmt/dsum.target)})` : `Target reached (+${fmtAED(-pendingAmt)})`;
+        } else {
+          tgt = 'Not set'; ach = fmtAED(dsum.achieved); pend = '-';
+        }
+        deliveryHtml = `<div class="bst-metric"><p class="bst-metric-label">Delivery Net sale</p><p class="bst-metric-val" style="margin-top:.25rem">${line('Target', tgt)}${line('Achieved', ach)}${line('Pending', pend)}</p></div>`;
+      }
+    }
     if (!sum.hasTarget){
-      wrap.innerHTML = `<div class="bst-metric"><p class="bst-metric-label">Achieved so far</p><p class="bst-metric-val">${fmtAED(sum.achieved)}</p></div>`;
+      wrap.innerHTML = `<div class="bst-metric"><p class="bst-metric-label">Achieved so far</p><p class="bst-metric-val">${fmtAED(sum.achieved)}</p></div>` + deliveryHtml;
       return;
     }
     const wdAmt = (s.monthlyTarget||0)*(s.wdPoolPct||0);
@@ -3689,6 +3707,7 @@
       <div class="bst-metric"><p class="bst-metric-label">Dine in &amp; TA Net sale target</p><p class="bst-metric-val">${fmtAED(sum.target)}${poolSubtext}</p></div>
       <div class="bst-metric"><p class="bst-metric-label">Achieved so far</p><p class="bst-metric-val">${fmtAED(sum.achieved)}<br><span style="font-size:11px;font-weight:400">${fmtPct(sum.achievedPct)} of target</span>${wdWeAchievedHtml}</p></div>
       <div class="bst-metric"><p class="bst-metric-label">Remaining to achieve</p><p class="bst-metric-val">${fmtAED(sum.remaining)}<br><span style="font-size:11px;font-weight:400">${fmtPct(remainingPct)} of target</span>${wdWeRemainingHtml}</p></div>
+      ${deliveryHtml}
       ${promoStatsHtml}
       <div class="bst-metric"><p class="bst-metric-label">Per day avg</p><p class="bst-metric-val" style="font-size:15px">Achieved: ${sum.perDayAvg==null?'-':fmtAED(sum.perDayAvg)}<br>Required: ${sum.gapAmountPerDay==null?'-':fmtAED(sum.gapAmountPerDay)}</p>${weekArrowHtml}</div>
     `;
